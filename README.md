@@ -1,5 +1,7 @@
 The Make and Ninja generators behave quite differently when dealing with ExternalProjects. I wanted to document the Ninja behaviour here since I would consider it buggy/un-intuitive.
 
+[cmake bug report](https://cmake.org/Bug/view.php?id=15954)
+
 Suppose we have a 'superbuild' project that has a hierarchy like this:
 ```
 .
