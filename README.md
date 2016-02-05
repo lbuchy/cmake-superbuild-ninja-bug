@@ -1,30 +1,26 @@
-# cmake-superbuild-ninja-bug
+The Make and Ninja generators behave quite differently when dealing with ExternalProjects. I wanted to document the Ninja behaviour here since I would consider it buggy/un-intuitive.
 
-Instructions:
-
-Setup the build, generate the files
+Suppose we have a 'superbuild' project that has a hierarchy like this:
 ```
-mkdir build/make build/ninja
-
-pushd build/make
-cmake ../../.
-popd
-
-pushd build/ninja
-cmake ../../. -GNinja
-popd
+.
+├── bar
+│   ├── CMakeLists.txt
+│   └── main.cpp
+├── CMakeLists.txt
+└── foo
+    ├── CMakeLists.txt
+    ├── include/
+    └── src/
 ```
 
-First we will build with the make system.
-```
-cd build/make
-make
-```
+The top-level cmake file sets up two external projects, foo and bar. bar depends on foo. The foo project installs libraries into a staging path and bar pulls the configuration from that path to import the foo library (and headers).
 
-This is the output
+If I use the make generator and build from the top cmake file. I see that foo is built and installed, then bar is built and linked to foo. 
+
+
 ```
 Scanning dependencies of target foo
-[  6%] Creating directories for 'foo'
+[ 6%] Creating directories for 'foo'
 [ 12%] No download step for 'foo'
 [ 18%] No patch step for 'foo'
 [ 25%] No update step for 'foo'
@@ -45,7 +41,7 @@ Scanning dependencies of target foo
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
--- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/foo-build
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/foo-build
 [ 37%] Performing build step for 'foo'
 Scanning dependencies of target foo
 [ 50%] Building CXX object CMakeFiles/foo.dir/src/foo.cpp.o
@@ -55,10 +51,10 @@ Scanning dependencies of target foo
 [100%] Built target foo
 Install the project...
 -- Install configuration: ""
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/libfoo.a
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/foo-config.cmake
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/foo-config-noconfig.cmake
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/include/foo.h
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/libfoo.a
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config.cmake
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config-noconfig.cmake
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/include/foo.h
 [ 50%] Completed 'foo'
 [ 50%] Built target foo
 Scanning dependencies of target bar
@@ -83,7 +79,7 @@ Scanning dependencies of target bar
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
--- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/bar-build
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/bar-build
 [ 87%] Performing build step for 'bar'
 Scanning dependencies of target bar
 [ 50%] Building CXX object CMakeFiles/bar.dir/main.cpp.o
@@ -94,25 +90,27 @@ Scanning dependencies of target bar
 [100%] Built target bar
 ```
 
-If we build again, this is our output.
+
+If I don't change anything and run it again, then I see the foo install step run, no changes are needed and then the bar build step run (bar doesn't get relinked).
+
 
 ```
-[  6%] Performing build step for 'foo'
+[ 6%] Performing build step for 'foo'
 [100%] Built target foo
 [ 12%] Performing install step for 'foo'
 [100%] Built target foo
 Install the project...
 -- Install configuration: ""
--- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/libfoo.a
--- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/foo-config.cmake
--- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/lib/foo/foo-config-noconfig.cmake
--- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/staging/include/foo.h
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/libfoo.a
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config.cmake
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config-noconfig.cmake
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/include/foo.h
 [ 18%] Completed 'foo'
 [ 50%] Built target foo
 [ 56%] Performing configure step for 'bar'
 -- Configuring done
 -- Generating done
--- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/make/bar-build
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/bar-build
 [ 62%] Performing build step for 'bar'
 [100%] Built target bar
 [ 68%] No install step for 'bar'
@@ -120,16 +118,44 @@ Install the project...
 [100%] Built target bar
 ```
 
-Note that in the case of the make generator.  The dependent target is reinstalled every time, even though it hasn't changed.
-For large projects with multiple dependencies, this can lead to fairly substantial times for no-op builds.
 
-Now build with ninja
+Now if I touch something in foo, we can see that foo is rebuilt. The library is reinstalled and bar is relinked. This results in the correct executable.
+
+
 ```
-ninja
+[ 6%] Performing build step for 'foo'
+Scanning dependencies of target foo
+[ 50%] Building CXX object CMakeFiles/foo.dir/src/foo.cpp.o
+[100%] Linking CXX static library libfoo.a
+[100%] Built target foo
+[ 12%] Performing install step for 'foo'
+[100%] Built target foo
+Install the project...
+-- Install configuration: ""
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/libfoo.a
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config.cmake
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/lib/foo/foo-config-noconfig.cmake
+-- Up-to-date: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/staging/include/foo.h
+[ 18%] Completed 'foo'
+[ 50%] Built target foo
+[ 56%] Performing configure step for 'bar'
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/bar-build
+[ 62%] Performing build step for 'bar'
+[ 50%] Linking CXX executable bar
+[100%] Built target bar
+[ 68%] No install step for 'bar'
+[ 75%] Completed 'bar'
+[100%] Built target bar
 ```
 
-This is the output
+
+If I use the ninja generator then the behaviour is different. On the first invocation of 'ninja, foo is built and installed, then bar is built and linked to foo. 
+
+
 ```
+[5/16] Performing configure step for 'foo'
 -- The C compiler identification is GNU 4.8.4
 -- The CXX compiler identification is GNU 4.8.4
 -- Check for working C compiler using: Ninja
@@ -146,17 +172,17 @@ This is the output
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
--- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/foo-build
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/foo-build
 [6/16] Performing build step for 'foo'
 [1/2] Building CXX object CMakeFiles/foo.dir/src/foo.cpp.o
 [2/2] Linking CXX static library libfoo.a
 [7/16] Performing install step for 'foo'
 [1/1] Install the project...
 -- Install configuration: ""
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/staging/lib/foo/libfoo.a
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/staging/lib/foo/foo-config.cmake
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/staging/lib/foo/foo-config-noconfig.cmake
--- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/staging/include/foo.h
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/staging/lib/foo/libfoo.a
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/staging/lib/foo/foo-config.cmake
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/staging/lib/foo/foo-config-noconfig.cmake
+-- Installing: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/staging/include/foo.h
 [13/16] Performing configure step for 'bar'
 -- The C compiler identification is GNU 4.8.4
 -- The CXX compiler identification is GNU 4.8.4
@@ -174,13 +200,17 @@ This is the output
 -- Detecting CXX compile features - done
 -- Configuring done
 -- Generating done
--- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/build/ninja/bar-build
+-- Build files have been written to: /media/data/home/lbuchy/work/cmake/cmake-ninja-install-out/ninja/bar-build
 [14/16] Performing build step for 'bar'
 [1/2] Building CXX object CMakeFiles/bar.dir/main.cpp.o
 [2/2] Linking CXX executable bar
 [16/16] Completed 'bar'
 ```
-Subsequent calls to ninja do this:
+
+
+On subsequent invocations (with no changes to bar), there is no work to do. Checking that the installed files are there is not done. But it sure is quick to run a no-op build!
+
+
 ```
 [1/7] Performing build step for 'foo'
 ninja: no work to do.
@@ -188,12 +218,10 @@ ninja: no work to do.
 ninja: no work to do.
 ```
 
-The Ninja generator does better.   It doesn't reinstall dependent projects like the make generator.
 
-However, what happens if we change something in a dependent project?
-Lets change something in foo/src/foo.cpp, perhaps make it say "BAZ"
+But if I touch a file in foo, then foo is rebuilt but not reinstalled. bar is not relinked and thus the bar executable is stale.
 
-The output of ninja is now:
+
 ```
 [1/7] Performing build step for 'foo'
 [1/2] Building CXX object CMakeFiles/foo.dir/src/foo.cpp.o
@@ -201,7 +229,3 @@ The output of ninja is now:
 [2/4] Performing build step for 'bar'
 ninja: no work to do.
 ```
-
-Notice that it recompiled foo, but it doesn't reinstall it.  
-bar is not relinked either since it's dependent library technically didnt change.  We end up with a stale executable.
-
